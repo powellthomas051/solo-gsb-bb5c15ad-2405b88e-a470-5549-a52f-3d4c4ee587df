@@ -20,6 +20,7 @@ import { Waveform } from './components/Waveform';
 import { ChapterList } from './components/ChapterList';
 import { ChainBar } from './components/ChainBar';
 import { FadePanel } from './components/FadePanel';
+import { ImportDialog } from './components/ImportDialog';
 import { LoudnessPanel } from './components/LoudnessPanel';
 import { SilencePanel } from './components/SilencePanel';
 import { TransportBar } from './components/TransportBar';
@@ -31,6 +32,11 @@ import {
   type ChainEditResult,
 } from './utils/chainOps';
 import { downloadFile, toJSON, toWebVTT } from './utils/export';
+import {
+  buildImportPlan,
+  parseChapterFile,
+  type ImportPlan,
+} from './utils/importChapters';
 import { formatTime } from './utils/time';
 
 const NUDGE_FINE = 0.05;
@@ -50,6 +56,12 @@ export default function App() {
   const [follow, setFollow] = useState(true);
   const [decoding, setDecoding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // chapter-file import preview (JSON exported here, or standard WebVTT)
+  const [importPreview, setImportPreview] = useState<{
+    fileName: string;
+    plan: ImportPlan;
+  } | null>(null);
 
   // silence-split suggestions
   const [rmsWindows, setRmsWindows] = useState<Float32Array | null>(null);
@@ -205,6 +217,7 @@ export default function App() {
   const loadFile = useCallback(
     async (file: File) => {
       setError(null);
+      setImportPreview(null); // a new audio invalidates any open import preview
       setDecoding(true);
       try {
         const buffer = await engine.decode(file);
@@ -239,6 +252,45 @@ export default function App() {
     const f = e.dataTransfer.files?.[0];
     if (f) void loadFile(f);
   };
+
+  // ---- chapter file import ----
+
+  const onImportInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setError(null);
+    void f.text().then(
+      (text) => {
+        try {
+          const parsed = parseChapterFile(text);
+          setImportPreview({
+            fileName: f.name,
+            plan: { format: parsed.format, entries: buildImportPlan(parsed.chapters, chapters, duration) },
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : '无法解析该章节文件。');
+        }
+      },
+      () => setError('无法读取该文件。'),
+    );
+  };
+
+  /** Apply the preview's valid entries as one undoable step; on any
+   *  inconsistency nothing is written and the failure is reported. */
+  const confirmImport = useCallback(() => {
+    if (!importPreview) return;
+    const okCount = importPreview.plan.entries.filter((e) => e.status === 'ok').length;
+    const applied = chaptersApi.applyImport(importPreview.plan.entries);
+    setImportPreview(null);
+    if (applied) {
+      showNotice(`已导入 ${okCount} 个章节（可撤销）`, `import:${Date.now()}`);
+    } else {
+      setError('导入失败：条目与当前章节状态冲突，未写入任何更改。');
+    }
+  }, [importPreview, chaptersApi, showNotice]);
+
+  const cancelImport = useCallback(() => setImportPreview(null), []);
 
   const seek = useCallback(
     (t: number) => {
@@ -356,6 +408,11 @@ export default function App() {
       ) {
         return;
       }
+      // while the import preview is open, only Escape (cancel) is handled
+      if (importPreview) {
+        if (e.key === 'Escape') cancelImport();
+        return;
+      }
       if (!peaks) return;
       const step = e.shiftKey ? NUDGE_COARSE : NUDGE_FINE;
       const sel = chaptersApi.selected;
@@ -406,6 +463,8 @@ export default function App() {
     addAtPlayhead,
     reportLockedAttempt,
     showNotice,
+    importPreview,
+    cancelImport,
   ]);
 
   const baseName = (fileName ?? 'podcast').replace(/\.[^.]+$/, '');
@@ -420,6 +479,19 @@ export default function App() {
         </label>
         {fileName && <span className="file-name">{fileName}</span>}
         <span className="spacer" />
+        <label
+          className={peaks ? 'file-button' : 'file-button disabled'}
+          title={peaks ? '导入本工具导出的 JSON 或标准 WebVTT 章节文件' : '请先导入音频'}
+        >
+          导入章节
+          <input
+            type="file"
+            accept=".vtt,.json,text/vtt,application/json"
+            disabled={!peaks}
+            onChange={onImportInput}
+            hidden
+          />
+        </label>
         <button
           disabled={chapters.length === 0}
           onClick={() => downloadFile(`${baseName}.vtt`, toWebVTT(chapters), 'text/vtt')}
@@ -442,6 +514,14 @@ export default function App() {
 
       {error && <div className="error-banner">{error}</div>}
       {notice && <div className="chain-notice">{notice}</div>}
+      {importPreview && (
+        <ImportDialog
+          fileName={importPreview.fileName}
+          plan={importPreview.plan}
+          onApply={confirmImport}
+          onCancel={cancelImport}
+        />
+      )}
 
       {!peaks ? (
         <div className="drop-zone">

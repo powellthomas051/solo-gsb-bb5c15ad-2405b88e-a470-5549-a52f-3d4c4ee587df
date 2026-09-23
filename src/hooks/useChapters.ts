@@ -7,6 +7,7 @@ import {
   chainResizeChapter,
   type ChainEditResult,
 } from '../utils/chainOps';
+import { mergeImportedChapters, type ImportEntry } from '../utils/importChapters';
 import { emptyHistory, record, undo as undoStep, redo as redoStep, type History } from '../utils/history';
 
 export type { ChainEditResult } from '../utils/chainOps';
@@ -82,6 +83,21 @@ export function useChapters(duration: number) {
       commit(next);
     },
     [commit],
+  );
+
+  /**
+   * Apply an import preview as ONE undoable step: ids are rebuilt, the
+   * merged list is sorted by start and verified non-overlapping. Returns
+   * false — and writes nothing — when the merge would break the invariants.
+   */
+  const applyImport = useCallback(
+    (entries: ImportEntry[]): boolean => {
+      const next = mergeImportedChapters(chaptersRef.current, entries, duration);
+      if (!next) return false;
+      commit(next);
+      return true;
+    },
+    [commit, duration],
   );
 
   /** Create from a drag range; returns new id or null if no room. */
@@ -250,6 +266,7 @@ export function useChapters(duration: number) {
     select,
     addChapter,
     addMany,
+    applyImport,
     createFromDrag,
     createAtPlayhead,
     move,
