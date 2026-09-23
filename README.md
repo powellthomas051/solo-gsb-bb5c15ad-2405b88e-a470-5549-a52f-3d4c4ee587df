@@ -1,6 +1,6 @@
 # 播客章节标注工作台 (Podcast Chapter Studio)
 
-基于 **React + TypeScript + Web Audio API** 的网页播客章节标注工具：导入本地音频后，在可缩放波形上拖拽创建、移动、调整章节区间，自动吸附邻近边界并阻止重叠，支持键盘微调、章节搜索/排序、选中片段实时预览，并导出带章节标题的 **WebVTT** 和 **JSON** 文件。所有章节编辑（创建、移动、缩放、重命名、删除以及「应用全部候选」）均记录为**可撤销 / 重做**的可逆操作，工具条按钮与 `Ctrl/Cmd+Z`、`Ctrl/Cmd+Shift+Z` 快捷键均可使用，撤销 / 重做不影响当前播放状态。内置**静音切分建议**：按 100ms 窗口分析多声道 RMS，自动在静音中点给出候选切分边界，可一键应用。另内置**章节音量一致性质检**：按 200ms 窗口计算多声道合并 dBFS，以窗口与章节的实际重叠时长加权汇总每章平均音量与动态范围，可自定义过轻 / 过响阈值，异常区间在波形上着色、点击即可从该处预览，并随 JSON 一并导出。支持**章节淡入淡出试听**：每章可独立设置 0～5 秒的淡入 / 淡出时长与开关，预览时按实际播放区间构建增益包络，淡入从静音平滑升至原音量、淡出在章尾前降至静音。另有**连锁移动模式**：锁定任意章节后，拖动 / 缩放未锁定章节会把边界位移原样传递给其后的未锁定章节（间隔与各章时长不变），遇到锁定章节或音频边界自动钳制并提示原因，一次拖拽连带变更整体可撤销 / 重做；锁定状态仅保留在当前会话，不影响导出格式。
+基于 **React + TypeScript + Web Audio API** 的网页播客章节标注工具：导入本地音频后，在可缩放波形上拖拽创建、移动、调整章节区间，自动吸附邻近边界并阻止重叠，支持键盘微调、章节搜索/排序、选中片段实时预览，并导出带章节标题的 **WebVTT** 和 **JSON** 文件；也支持从本地 **JSON / WebVTT 章节文件导入**：解析后按当前音频时长逐条校验，在预览对话框中标出新增、时间越界、与现有章节重叠等状态，可只应用勾选的有效条目，整次导入为一个可撤销步骤。所有章节编辑（创建、移动、缩放、重命名、删除、「应用全部候选」以及章节文件导入）均记录为**可撤销 / 重做**的可逆操作，工具条按钮与 `Ctrl/Cmd+Z`、`Ctrl/Cmd+Shift+Z` 快捷键均可使用，撤销 / 重做不影响当前播放状态。内置**静音切分建议**：按 100ms 窗口分析多声道 RMS，自动在静音中点给出候选切分边界，可一键应用。另内置**章节音量一致性质检**：按 200ms 窗口计算多声道合并 dBFS，以窗口与章节的实际重叠时长加权汇总每章平均音量与动态范围，可自定义过轻 / 过响阈值，异常区间在波形上着色、点击即可从该处预览，并随 JSON 一并导出。支持**章节淡入淡出试听**：每章可独立设置 0～5 秒的淡入 / 淡出时长与开关，预览时按实际播放区间构建增益包络，淡入从静音平滑升至原音量、淡出在章尾前降至静音。另有**连锁移动模式**：锁定任意章节后，拖动 / 缩放未锁定章节会把边界位移原样传递给其后的未锁定章节（间隔与各章时长不变），遇到锁定章节或音频边界自动钳制并提示原因，一次拖拽连带变更整体可撤销 / 重做；锁定状态仅保留在当前会话，不影响导出格式。
 
 ## 一键启动（Docker）
 
@@ -23,7 +23,7 @@ PORT=9090 docker compose up --build
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 章节吸附/防重叠 + 连锁移动 + 撤销/重做历史 + 静音切分 + 音量质检 + 淡入淡出包络核心逻辑测试
+npm test           # 章节吸附/防重叠 + 连锁移动 + 撤销/重做历史 + 静音切分 + 音量质检 + 淡入淡出包络 + 章节文件导入核心逻辑测试
 npm run build      # 产出 dist/
 ```
 
@@ -41,7 +41,7 @@ npm run build      # 产出 dist/
   - 超出可行范围时，**整次操作被钳制在可行范围内**（绝不产生重叠），波形上在止点处显示琥珀色虚线「墙」（🔒 锁定章节 / 相邻章节 / 音频边界 / 最短时长），页面顶部弹出原因提示；连锁条同步显示「带动 N 个后续章节、位移 ±x.xx s、已钳制于…」的实时摘要。
   - **锁定章节任何模式下都不能被移动或缩放**（光标显示禁止态，波形右上角与列表项均有 🔒 标识），但仍可选中、预览、重命名与删除；锁定只存在于**当前会话**（刷新 / 导入新音频即清空），**不写入章节数据，WebVTT / JSON 导出格式保持不变**。
   - 一次连续拖拽（及其全部连带位移）只算**一个撤销步骤**，`Ctrl/Cmd+Z` 完整恢复锚点与所有被带动章节；键盘微调同样支持连锁与合并撤销。关闭连锁开关后编辑退化为单章行为（锁定保护仍生效）。
-- **撤销 / 重做**：章节创建、移动、缩放、重命名、删除以及「应用全部候选」均为可逆步骤；工具条「↶ 撤销 / ↷ 重做」按钮或 `Ctrl/Cmd+Z`、`Ctrl/Cmd+Shift+Z` 触发。一次连续拖拽、按住方向键微调或在标题框连续输入只算一个历史步骤；任何新编辑都会清空重做栈（分支即失效），撤销 / 重做只回退章节数据，**不改变当前播放 / 暂停状态与播放头位置，也不改变章节锁定状态**；导入新音频时历史与锁定随章节一并重置。
+- **撤销 / 重做**：章节创建、移动、缩放、重命名、删除、「应用全部候选」以及「章节文件导入」均为可逆步骤；工具条「↶ 撤销 / ↷ 重做」按钮或 `Ctrl/Cmd+Z`、`Ctrl/Cmd+Shift+Z` 触发。一次连续拖拽、按住方向键微调或在标题框连续输入只算一个历史步骤；任何新编辑都会清空重做栈（分支即失效），撤销 / 重做只回退章节数据，**不改变当前播放 / 暂停状态与播放头位置，也不改变章节锁定状态**；导入新音频时历史与锁定随章节一并重置。
 - **跳转**：单击波形空白处移动播放头。
 - **静音切分建议**：右侧面板调节「静音阈值」（-70 ~ -20 dB）与「最短静音」（0.2 ~ 3s），候选边界以橙色虚线旗标实时预览在波形上；候选只落在未被章节覆盖的空白区间，且自动过滤会产生短于 0.2s 章节的边界。点击「应用全部候选」即在空白区间批量生成章节，已有章节保持不变、结果不重叠。
 - **章节音量一致性质检**：导入时复用同一份已解码 PCM，按 **200ms 窗口**计算多声道合并 dBFS（仅扫描一次）。右侧面板可设置「过轻阈值」（默认 -30 dBFS）与「过响阈值」（默认 -6 dBFS，两阈值始终保持至少 1 dB 间隔）。
@@ -50,6 +50,10 @@ npm run build      # 产出 dist/
   - 章节列表每项显示状态徽标（正常 / 过轻 / 过响 / 过短 + 均值），点击徽标从该章首个异常窗口预览；选中章节的详情区显示均值、动态范围与 min/max，并有「从异常处预览」按钮。
   - 调整阈值只对缓存的窗口 dBFS 重新判定，**不会重新解码或重新扫描音频**。
 - **搜索 / 排序**：左侧面板按标题搜索，可按开始时间、标题或时长排序。
+- **导入章节文件**：页头「导入章节」按钮（与「导出 WebVTT / 导出 JSON」并列，需先导入音频）选择本工具导出的 `*.chapters.json`（或标准 `{ chapters: [...] }` / 章节对象数组）与标准 `*.vtt` 文件（支持 cue 序号、cue 设置、`NOTE/STYLE/REGION` 块、`HH:MM:SS.mmm` 与 `MM:SS.mmm` 时间码、逗号小数、BOM）。
+  - 解析后弹出**导入预览**：逐条标出状态——**新增**（可直接导入）、**时间越界**（起点为负或超出当前音频时长）、**重叠**（与现有章节或文件中较早的有效条目重叠）、**无法解析**（时间码非法 / 时长为 0 / 短于 0.2s / 结束早于开始），并给出具体原因；可按「全部 / 可导入 / 问题条目」筛选。
+  - 仅**新增（有效）**条目可勾选，默认全选；点「应用」只写入勾选项，**现有章节保持不变**，导入条目自动重建唯一 id、与现有章节合并后按开始时间排序并整体校验不重叠、不出界；空标题按排序后序号补全。「全部取消」或 `Esc` 放弃导入。
+  - 应用为**一次可撤销 / 重做操作**（一次 `Ctrl/Cmd+Z` 完整还原）；应用前若最终合并结果存在重叠 / 越界则整体中止并提示，**不会部分写入**。导入新音频会关闭已打开的导入预览。
 - **预览**：列表项 ▶、「预览章节」按钮或快捷键 `P` 播放选中章节区间（到点自动停止）。
 - **淡入淡出试听**：选中章节后，在右侧详情区开启「预览该章时应用淡入淡出」，分别设置淡入 / 淡出时长（0～5 秒，步进 0.1s）。
   - 预览该章（含「从异常处预览」）时按**实际播放区间**构建增益包络：淡入从静音线性升至原音量，保持后在章尾前线性降至静音，曲线连续、不越过章界。
@@ -73,10 +77,10 @@ npm run build      # 产出 dist/
 | `Delete` / `Backspace` | 删除选中章节 |
 | `Esc` | 取消选中 |
 
-### 导出
+### 导出 / 导入
 
-- **WebVTT**（`*.vtt`）：标准 `WEBVTT`  cues，按开始时间排序，章节标题作为 cue 文本。
-- **JSON**（`*.chapters.json`）：`{ version, qualityControl, chapters: [...] }`，时间单位为秒。已导入音频时顶层附带质检参数 `qualityControl: { windowSeconds: 0.2, quietThresholdDb, loudThresholdDb }`，每章附带 `qualityControl`：
+- **导出 WebVTT**（`*.vtt`）：标准 `WEBVTT` cue，按开始时间排序，章节标题作为 cue 文本。
+- **导出 JSON**（`*.chapters.json`）：`{ version, qualityControl, chapters: [...] }`，时间单位为秒。已导入音频时顶层附带质检参数 `qualityControl: { windowSeconds: 0.2, quietThresholdDb, loudThresholdDb }`，每章附带 `qualityControl`：
 
 ```json
 {
@@ -95,6 +99,8 @@ npm run build      # 产出 dist/
 
 全静音章节的 `meanDbfs/minDbfs/maxDbfs` 输出为 `null`（不会输出 `NaN` 或 `Infinity`）。
 
+- **导入章节文件**：接受上述 JSON 导出文件（顶层也接受裸章节数组、秒数可写成数字或 WebVTT 时间码字符串，多余字段如 `index/duration/qualityControl` 一律忽略）与标准 WebVTT（跳过文件头与 `NOTE/STYLE/REGION` 块，容忍 cue 序号与 cue 设置，剥离标签 / 实体）。逐行解析失败的 cue 不会中断整个文件，而是在预览中列为「无法解析」；每行按当前音频时长与现有章节校验为新增 / 时间越界 / 重叠，文件内部互斥冲突归责给较晚的 cue。应用时只取勾选的有效行，重新生成 id 后与现有章节合并、排序并整体复验（越界 / 过短 / 重叠即抛错放弃，绝不部分写入）。
+
 ## 技术要点
 
 - 波形为自绘 Canvas：解码后预计算 200 peaks/s 的 min/max 峰值，任意缩放级别下按像素列聚合渲染，长音频也流畅。
@@ -103,6 +109,7 @@ npm run build      # 产出 dist/
 - 吸附 / 防重叠逻辑集中在 `src/utils/chapterOps.ts` 纯函数中（`moveChapter` / `resizeChapter` / `createChapterInGap` / `findFreeGap`），由 `scripts/test-chapterOps.ts` 覆盖。
 - 连锁移动为独立纯函数模块 `src/utils/chainOps.ts`（`chainMoveChapter` / `chainResizeChapter` / `planChainEdit`）：以被编辑章节为锚点构建“连锁串”（其后未锁定章节，遇第一个锁定章节或音频结尾截断），把整串视为刚性滑块统一钳制位移，吸附目标只取不随操作移动的静态边界；左边缘缩放不向后连带；结果携带 `clipped / reason / stop / limitAt` 供 UI 画“墙”与提示。300 组随机锁定 / 拖动 / 缩放的压力断言保证任意结果都不重叠、不出界、不短于最小时长（`scripts/test-chainOps.ts` 覆盖）。
 - 撤销 / 重做为快照式历史栈（`src/utils/history.ts` 纯函数：`record` / `undo` / `redo`）：每条记录保存变更前后的章节数组，新记录即清空重做栈，同 `mergeKey` 且在 800ms 合并窗口内的连续编辑（拖拽、键盘连按、标题连续输入）合并为单步，栈深上限 200；由 `scripts/test-history.ts` 覆盖（含一次连锁拖拽的锚点+随动章节整体恢复用例）。历史状态保存在 `useChapters` 的 ref 中（提交时同步镜像章节数据，避免在 React state updater 内产生副作用），导入新音频调用 `reset()` 一并清空，撤销 / 重做不触碰播放引擎与锁定集合。章节锁定与连锁开关为 `useChapters` 中的会话级 state（不进入 `Chapter` 数据、不导出、不参与历史）。
+- 章节文件导入为独立纯函数模块 `src/utils/importChapters.ts`（`parseWebVTT` / `parseJSONChapters` / `buildImportPreview` / `applyImportedChapters`）：WebVTT 时间码支持 `HH:MM:SS.mmm`、`MM:SS.mmm` 与逗号小数，逐行解析失败不影响其他 cue；预览按文件顺序把每条 cue 判定为新增 / 时间越界 / 重叠 / 无法解析（与现有章节或较早有效 cue 的互斥冲突归责较晚者，保证有效集合两两不重叠）；应用时只取勾选的有效行，重新生成唯一 id、与现有章节合并排序并整体复验，任何越界 / 过短 / 重叠都抛错且不写入（全有或全无），随后由 `useChapters.replaceAll` 作为**单个历史步骤**提交；由 `scripts/test-importChapters.ts` 覆盖（含本工具 JSON 导出的往返导入与失败不写入用例）。
 - 淡入淡出包络为纯函数（`src/audio/fade.ts`：`fitFadeTimes` 等比例压缩、`buildFadeCurve` 生成曲线关键点），由 `scripts/test-fade.ts` 覆盖；播放时 `AudioEngine` 为每次预览挂一个独立的 `GainNode` 包络（source → envelope → 主增益），停止 / 重建时取消自动化并断开节点，杜绝残留声音。
 - 播放基于 Web Audio API：`AudioBufferSourceNode` 支持带结束点的片段预览，播放头由 rAF 驱动。
 - Docker 为多阶段构建：`node:20-alpine` 构建 → `nginx:1.27-alpine` 托管静态文件。
@@ -115,12 +122,13 @@ npm run build      # 产出 dist/
 ├── nginx.conf              # SPA 回退 + 静态资源缓存
 ├── src/
 │   ├── audio/              # AudioEngine（播放/片段预览/淡入淡出包络）、fade（包络曲线）、peaks（波形峰值）、silence（静音 RMS/候选边界）、loudness（200ms dBFS/章节质检）
-│   ├── components/         # Waveform（锁定标识/连锁随动高亮/止点墙） / ChapterList（锁定按钮）/ ChainBar（连锁开关+实时摘要） / TransportBar / SilencePanel / LoudnessPanel / FadePanel
-│   ├── hooks/useChapters.ts  # 章节增删改 + 撤销/重做历史 + 会话级锁定/连锁开关（reset 随导入清空）
+│   ├── components/         # Waveform（锁定标识/连锁随动高亮/止点墙） / ChapterList（锁定按钮）/ ChainBar（连锁开关+实时摘要） / ImportDialog（JSON/WebVTT 导入预览）/ TransportBar / SilencePanel / LoudnessPanel / FadePanel
+│   ├── hooks/useChapters.ts  # 章节增删改 + 撤销/重做历史 + 会话级锁定/连锁开关（reset 随导入清空）+ replaceAll 整表事务
 │   ├── utils/chapterOps.ts # 吸附、防重叠、空档查找（纯函数）
 │   ├── utils/chainOps.ts   # 连锁移动/缩放、止点钳制与原因、连锁预览方案（纯函数）
 │   ├── utils/snap.ts       # 最近边界吸附（纯函数）
 │   ├── utils/history.ts    # 撤销/重做快照栈、连续编辑合并、重做栈清空（纯函数）
-│   └── utils/export.ts     # WebVTT / JSON（含章节质检指标）导出
-└── scripts/                # test-chapterOps、test-chainOps、test-history、test-silence、test-loudness、test-fade
+│   ├── utils/export.ts     # WebVTT / JSON（含章节质检指标）导出
+│   └── utils/importChapters.ts # WebVTT / JSON 解析、逐条校验预览、全有或全无合并（纯函数）
+└── scripts/                # test-chapterOps、test-chainOps、test-history、test-silence、test-loudness、test-fade、test-importChapters
 ```

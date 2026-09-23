@@ -20,6 +20,7 @@ import { Waveform } from './components/Waveform';
 import { ChapterList } from './components/ChapterList';
 import { ChainBar } from './components/ChainBar';
 import { FadePanel } from './components/FadePanel';
+import { ImportDialog } from './components/ImportDialog';
 import { LoudnessPanel } from './components/LoudnessPanel';
 import { SilencePanel } from './components/SilencePanel';
 import { TransportBar } from './components/TransportBar';
@@ -31,6 +32,13 @@ import {
   type ChainEditResult,
 } from './utils/chainOps';
 import { downloadFile, toJSON, toWebVTT } from './utils/export';
+import {
+  applyImportedChapters,
+  buildImportPreview,
+  parseChapterFile,
+  type ImportPreview,
+  type PreviewEntry,
+} from './utils/importChapters';
 import { formatTime } from './utils/time';
 
 const NUDGE_FINE = 0.05;
@@ -80,6 +88,17 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const noticeKeyRef = useRef<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+
+  // 本地章节文件导入（JSON / WebVTT）：文件解析后的预览状态
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importFileName, setImportFileName] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  // 每次选文件自增，避免快速连选两个文件时先返回的旧解析覆盖新预览
+  const importTokenRef = useRef(0);
+  // 应用时按此快照合并，保证“预览所见即应用所得”，失败不写任何内容
+  const previewExistingRef = useRef<Chapter[]>([]);
+  const previewDurationRef = useRef(0);
 
   /** 弹出一条临时提示；同一手势内相同 key 的提示不重复弹出。 */
   const showNotice = useCallback((msg: string, key: string) => {
@@ -240,6 +259,67 @@ export default function App() {
     if (f) void loadFile(f);
   };
 
+  // ---- 本地章节文件导入（本工具导出的 JSON / 标准 WebVTT）----
+  const closeImportDialog = useCallback(() => {
+    importTokenRef.current += 1; // discard any in-flight file read
+    setImportPreview(null);
+    setImportError(null);
+    setImportFileName('');
+  }, []);
+
+  const onImportFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    const token = ++importTokenRef.current;
+    setImportFileName(f.name);
+    setImportError(null);
+    setImportPreview(null);
+    f.text()
+      .then((text) => {
+        if (token !== importTokenRef.current) return; // a newer file was chosen
+        const parsed = parseChapterFile(text);
+        // snapshot the validation context so apply matches the preview even
+        // if chapters change while the dialog is open
+        previewExistingRef.current = chaptersApi.sortedChapters;
+        previewDurationRef.current = duration;
+        setImportPreview(buildImportPreview(parsed, previewExistingRef.current, duration));
+      })
+      .catch((err: unknown) => {
+        if (token !== importTokenRef.current) return;
+        setImportError(err instanceof Error ? err.message : '文件无法读取或解析。');
+      });
+  };
+
+  const applyImport = useCallback(
+    (entries: PreviewEntry[]) => {
+      if (!importPreview) return;
+      try {
+        // build the full next list up-front; the final guard throws on any
+        // overlap/out-of-range so replaceAll never performs a partial write
+        const next = applyImportedChapters(
+          importPreview,
+          previewExistingRef.current,
+          previewDurationRef.current,
+          new Set(entries.map((e) => e.row)),
+        );
+        chaptersApi.replaceAll(next);
+        showNotice(`已导入 ${entries.length} 个章节（可用撤销还原）。`, `import:${Date.now()}`);
+        closeImportDialog();
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : '导入失败，未写入任何更改。');
+      }
+    },
+    [importPreview, chaptersApi, showNotice, closeImportDialog],
+  );
+
+  // a new audio file invalidates any open import preview
+  useEffect(() => {
+    previewExistingRef.current = [];
+    setImportPreview(null);
+    setImportError(null);
+  }, [fileName]);
+
   const seek = useCallback(
     (t: number) => {
       const wasPlaying = engine.playing;
@@ -357,6 +437,9 @@ export default function App() {
         return;
       }
       if (!peaks) return;
+      // while the chapter import dialog is open, let it own the keyboard
+      // (Esc cancels; no background chapter shortcuts fire through it)
+      if (importPreview || importError) return;
       const step = e.shiftKey ? NUDGE_COARSE : NUDGE_FINE;
       const sel = chaptersApi.selected;
       let handled = true;
@@ -406,6 +489,8 @@ export default function App() {
     addAtPlayhead,
     reportLockedAttempt,
     showNotice,
+    importPreview,
+    importError,
   ]);
 
   const baseName = (fileName ?? 'podcast').replace(/\.[^.]+$/, '');
@@ -420,6 +505,20 @@ export default function App() {
         </label>
         {fileName && <span className="file-name">{fileName}</span>}
         <span className="spacer" />
+        <button
+          disabled={!peaks}
+          title={peaks ? '从本工具导出的 JSON 或标准 WebVTT 文件导入章节' : '请先导入音频，以便按时长校验章节'}
+          onClick={() => importFileInputRef.current?.click()}
+        >
+          导入章节
+        </button>
+        <input
+          ref={importFileInputRef}
+          type="file"
+          accept=".vtt,.json,text/vtt,application/json"
+          onChange={onImportFileInput}
+          hidden
+        />
         <button
           disabled={chapters.length === 0}
           onClick={() => downloadFile(`${baseName}.vtt`, toWebVTT(chapters), 'text/vtt')}
@@ -624,6 +723,14 @@ export default function App() {
           </div>
         </>
       )}
+      <ImportDialog
+        preview={importPreview}
+        fileName={importFileName}
+        parseError={importError}
+        duration={duration}
+        onApply={applyImport}
+        onClose={closeImportDialog}
+      />
     </div>
   );
 }

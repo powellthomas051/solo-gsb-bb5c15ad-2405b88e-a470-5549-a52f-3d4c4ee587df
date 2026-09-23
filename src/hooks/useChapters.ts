@@ -84,6 +84,26 @@ export function useChapters(duration: number) {
     [commit],
   );
 
+  /**
+   * Replace the whole chapter list in one transaction (chapter-file import).
+   * The caller must build `next` up-front and guarantee it is sorted and
+   * non-overlapping; this performs no partial writes — either the complete
+   * list is committed as a single undoable step or the function throws before
+   * touching any state.
+   */
+  const replaceAll = useCallback(
+    (next: Chapter[]) => {
+      if (chaptersEqual(chaptersRef.current, next)) return;
+      for (let i = 1; i < next.length; i++) {
+        if (next[i].start < next[i - 1].end - 1e-6) {
+          throw new Error('章节列表存在重叠，导入已中止。');
+        }
+      }
+      commit(next);
+    },
+    [commit],
+  );
+
   /** Create from a drag range; returns new id or null if no room. */
   const createFromDrag = useCallback(
     (a: number, b: number, snapThreshold: number): string | null => {
@@ -250,6 +270,7 @@ export function useChapters(duration: number) {
     select,
     addChapter,
     addMany,
+    replaceAll,
     createFromDrag,
     createAtPlayhead,
     move,
